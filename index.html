@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0f172a">
-  <meta name="description" content="20分ごとに遠くを見て目を休ませるタイマー">
+  <meta name="description" content="20分ごとに30秒〜、遠くを見て目を休ませるタイマー">
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="icon-192.png">
   <title>20-20-20 タイマー</title>
@@ -26,7 +26,7 @@
     .container {
       width:min(92vw,400px); background:var(--card-bg); padding:36px 24px 28px;
       border-radius:24px; box-shadow:0 20px 25px -5px rgba(0,0,0,.5);
-      text-align:center;
+      text-align:center; position:relative;
     }
     h1 { font-size:1.5rem; margin:0 0 7px; }
     .subtitle { color:var(--sub); font-size:.875rem; margin-bottom:28px; }
@@ -40,19 +40,53 @@
       font-variant-numeric:tabular-nums; letter-spacing:-3px;
       margin:0 0 28px; line-height:1;
     }
+    .btn-group {
+      display:flex; gap:10px; justify-content:center;
+    }
     .btn {
-      width:100%; min-height:58px; padding:14px 12px; font-size:1.05rem;
+      flex:1; min-height:58px; padding:14px 12px; font-size:1.05rem;
       font-weight:700; border:0; border-radius:14px; cursor:pointer;
       background:var(--primary); color:#0f172a;
       box-shadow:0 4px 12px rgba(56,189,248,.3);
       -webkit-tap-highlight-color:transparent;
+      transition: all 0.2s ease;
     }
     .btn:active { transform:scale(.98); }
     .btn-relax { background:var(--accent); box-shadow:0 4px 12px rgba(74,222,128,.3); animation:pulse 1.5s infinite; }
     .btn-stop { background:#475569; color:var(--text); box-shadow:none; }
+    .btn-reset {
+      flex:0 0 80px; background:#334155; color:var(--sub); font-size:0.9rem;
+      box-shadow:none;
+    }
     .info { margin-top:20px; font-size:.75rem; color:var(--sub); line-height:1.55; }
     .small { margin-top:12px; font-size:.7rem; color:#64748b; }
     @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.025)} }
+
+    /* モーダルダイアログ UI */
+    .modal-overlay {
+      position:fixed; top:0; left:0; right:0; bottom:0;
+      background:rgba(15, 23, 42, 0.85); backdrop-filter:blur(4px);
+      display:flex; justify-content:center; align-items:center;
+      z-index:999; opacity:0; pointer-events:none; transition:opacity 0.2s ease;
+    }
+    .modal-overlay.active { opacity:1; pointer-events:auto; }
+    .modal-box {
+      background:var(--card-bg); border:1px solid #334155;
+      padding:24px; border-radius:20px; width:min(85vw, 320px);
+      text-align:center; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);
+    }
+    .modal-title { font-size:1.1rem; font-weight:700; margin-bottom:8px; }
+    .modal-sub { font-size:0.8rem; color:var(--sub); margin-bottom:16px; }
+    .pin-input {
+      width:100%; font-size:1.5rem; text-align:center; letter-spacing:8px;
+      padding:10px; border-radius:10px; border:1px solid #475569;
+      background:#0f172a; color:var(--text); outline:none; margin-bottom:12px;
+    }
+    .pin-input:focus { border-color:var(--primary); }
+    .error-msg { color:var(--danger); font-size:0.75rem; min-height:1.2em; margin-bottom:12px; }
+    .modal-btns { display:flex; gap:8px; }
+    .btn-cancel { background:#334155; color:var(--text); flex:1; min-height:44px; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
+    .btn-confirm { background:var(--danger); color:#fff; flex:1; min-height:44px; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
   </style>
 </head>
 <body>
@@ -62,25 +96,48 @@
 
     <div id="status" class="status-badge">準備完了</div>
     <div id="timer" class="timer-display">20:00</div>
-    <button id="actionBtn" class="btn">タイマーを開始する</button>
+    
+    <div class="btn-group">
+      <button id="actionBtn" class="btn">タイマーを開始する</button>
+      <button id="resetBtn" class="btn btn-reset">リセット</button>
+    </div>
 
     <div class="info">
-      20分ごとに30秒、遠くを見て目を休ませます。<br>
-      ※通知はSafari / iPadOSの仕様により、バックグラウンド中に常に保証されるものではありません。
+      20分ごとに遠くを見て目を休ませます。<br>
+      ※放置時間に応じて次のゲーム時間や休憩時間が調整されます。
     </div>
     <div id="soundInfo" class="small">開始時に音声機能を有効化します。</div>
   </main>
 
+  <!-- 暗証番号入力用モーダル -->
+  <div id="modalOverlay" class="modal-overlay">
+    <div class="modal-box">
+      <div class="modal-title">リセットの確認</div>
+      <div class="modal-sub">暗証番号「2020」を入力してください</div>
+      <input type="password" id="pinInput" class="pin-input" maxlength="4" pattern="\d*" inputmode="numeric" placeholder="••••">
+      <div id="errorMsg" class="error-msg"></div>
+      <div class="modal-btns">
+        <button id="modalCancel" class="btn-cancel">キャンセル</button>
+        <button id="modalConfirm" class="btn-confirm">リセット</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 'use strict';
 
-const WORK_TIME = 20 * 60; // 秒
-const RELAX_TIME = 30;     // 秒
+const NORMAL_WORK_TIME = 20 * 60; // 20分 (秒)
+const PENALTY_WORK_TIME = 15 * 60; // 15分 (秒)
+const BASE_RELAX_TIME = 30;       // 30秒
+const RESET_PIN = "2020";          // リセット用暗証番号
 
 let state = 'STOPPED';     // STOPPED / WORK / ANNOUNCE / RELAX
-let endAt = 0;             // 現在フェーズの終了時刻(ms)
-let pausedRemaining = WORK_TIME;
+let endAt = 0;             // 現在フェーズの終了予定時刻 (ms)
+let announceStartAt = 0;   // アナウンス開始時刻 (ms)
+let pausedRemaining = NORMAL_WORK_TIME;
+let nextWorkDuration = NORMAL_WORK_TIME;
 let timerId = null;
+let announceAudioTimer = null;
 
 let audioCtx = null;
 let relaxGainNode = null;
@@ -90,7 +147,14 @@ let notificationRequested = false;
 const timerEl = document.getElementById('timer');
 const statusEl = document.getElementById('status');
 const actionBtn = document.getElementById('actionBtn');
+const resetBtn = document.getElementById('resetBtn');
 const soundInfoEl = document.getElementById('soundInfo');
+
+const modalOverlay = document.getElementById('modalOverlay');
+const pinInput = document.getElementById('pinInput');
+const errorMsg = document.getElementById('errorMsg');
+const modalCancel = document.getElementById('modalCancel');
+const modalConfirm = document.getElementById('modalConfirm');
 
 function initAudio() {
   try {
@@ -118,24 +182,47 @@ function sendNotification(title, body) {
   }
 }
 
-function playAnnounceSound() {
+function startAnnounceSound() {
+  stopAnnounceSound();
   if (!audioCtx) return;
-  const notes = [523.25, 659.25, 783.99, 1046.50];
-  const base = audioCtx.currentTime;
 
-  notes.forEach((freq, i) => {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    const t = base + i * 0.28;
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.28, t + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
-    osc.connect(gain).connect(audioCtx.destination);
-    osc.start(t);
-    osc.stop(t + 0.8);
-  });
+  function playChime() {
+    if (state !== 'ANNOUNCE') return;
+    const notes = [523.25, 659.25, 783.99, 1046.50];
+    const base = audioCtx.currentTime;
+
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const t = base + i * 0.22;
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.25, t + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.65);
+    });
+  }
+
+  playChime();
+  const intervalId = setInterval(() => {
+    if (Date.now() - announceStartAt > 60000 || state !== 'ANNOUNCE') {
+      clearInterval(intervalId);
+    } else {
+      playChime();
+    }
+  }, 1200);
+
+  announceAudioTimer = intervalId;
+}
+
+function stopAnnounceSound() {
+  if (announceAudioTimer) {
+    clearInterval(announceAudioTimer);
+    announceAudioTimer = null;
+  }
 }
 
 function startRelaxSound() {
@@ -148,7 +235,6 @@ function startRelaxSound() {
   relaxGainNode.gain.linearRampToValueAtTime(0.13, now + 1.5);
   relaxGainNode.connect(audioCtx.destination);
 
-  // Fmaj7系。音量はかなり控えめ。
   const frequencies = [174.61, 220.00, 261.63, 329.63, 392.00];
 
   frequencies.forEach(freq => {
@@ -204,6 +290,11 @@ function updateDisplay() {
     timerEl.textContent = formatTime(pausedRemaining);
     return;
   }
+  if (state === 'ANNOUNCE') {
+    const elapsedSec = Math.floor((Date.now() - announceStartAt) / 1000);
+    timerEl.textContent = formatTime(elapsedSec);
+    return;
+  }
   const remaining = Math.max(0, (endAt - Date.now()) / 1000);
   timerEl.textContent = formatTime(remaining);
 }
@@ -219,21 +310,24 @@ function startLoop() {
   tick();
 }
 
-function startWorkTimer(seconds=WORK_TIME) {
+function startWorkTimer(seconds=NORMAL_WORK_TIME) {
   stopRelaxSound();
+  stopAnnounceSound();
   state = 'WORK';
   endAt = Date.now() + seconds * 1000;
   pausedRemaining = seconds;
 
-  statusEl.textContent = 'ゲーム中（20分計測）';
+  const mins = Math.round(seconds / 60);
+  statusEl.textContent = `ゲーム中（${mins}分計測）`;
   statusEl.style.color = 'var(--primary)';
   setButton('一時停止');
   startLoop();
 }
 
-function startRelaxTimer() {
+function startRelaxTimer(durationSec) {
+  stopAnnounceSound();
   state = 'RELAX';
-  endAt = Date.now() + RELAX_TIME * 1000;
+  endAt = Date.now() + durationSec * 1000;
 
   statusEl.textContent = '遠くを見て目を休ませ中…';
   statusEl.style.color = 'var(--accent)';
@@ -245,24 +339,30 @@ function startRelaxTimer() {
 
 function enterAnnounce() {
   state = 'ANNOUNCE';
-  clearInterval(timerId);
-  timerId = null;
+  announceStartAt = Date.now();
   timerEl.textContent = '00:00';
 
-  playAnnounceSound();
-  sendNotification('20分経過しました！', '30秒、遠くを見て目を休ませましょう。');
+  startAnnounceSound();
+  sendNotification('20分経過しました！', '目を休ませましょう。ボタンを押して休憩を始めてください。');
 
   statusEl.textContent = '遠くを見る時間です！';
   statusEl.style.color = 'var(--danger)';
   setButton('休憩スタート（ヒーリング音）', 'btn btn-relax');
+  
+  startLoop();
 }
 
 function finishRelax() {
   stopRelaxSound();
-  startWorkTimer(WORK_TIME);
+  startWorkTimer(nextWorkDuration);
+  nextWorkDuration = NORMAL_WORK_TIME;
 }
 
 function tick() {
+  if (state === 'ANNOUNCE') {
+    updateDisplay();
+    return;
+  }
   if (state !== 'WORK' && state !== 'RELAX') return;
 
   const remaining = (endAt - Date.now()) / 1000;
@@ -286,34 +386,96 @@ function pauseWork() {
   setButton('再開する');
 }
 
+function resetAll() {
+  stopAnnounceSound();
+  stopRelaxSound(true);
+  clearInterval(timerId);
+  timerId = null;
+  
+  state = 'STOPPED';
+  pausedRemaining = NORMAL_WORK_TIME;
+  nextWorkDuration = NORMAL_WORK_TIME;
+  
+  updateDisplay();
+  statusEl.textContent = '準備完了';
+  statusEl.style.color = 'var(--primary)';
+  setButton('タイマーを開始する');
+}
+
+// モーダル表示・非表示処理
+function openPinModal() {
+  pinInput.value = '';
+  errorMsg.textContent = '';
+  modalOverlay.classList.add('active');
+  setTimeout(() => pinInput.focus(), 100);
+}
+
+function closePinModal() {
+  modalOverlay.classList.remove('active');
+  pinInput.blur();
+}
+
+function handlePinSubmit() {
+  if (pinInput.value === RESET_PIN) {
+    closePinModal();
+    resetAll();
+  } else {
+    errorMsg.textContent = '暗証番号が正しくありません';
+    pinInput.value = '';
+    pinInput.focus();
+  }
+}
+
 actionBtn.addEventListener('click', () => {
   initAudio();
   requestNotification();
 
   if (state === 'STOPPED') {
-    // 初回は20分、停止からの再開時は残り時間。
-    startWorkTimer(pausedRemaining > 0 && pausedRemaining < WORK_TIME ? pausedRemaining : WORK_TIME);
+    startWorkTimer(pausedRemaining > 0 && pausedRemaining < NORMAL_WORK_TIME ? pausedRemaining : NORMAL_WORK_TIME);
   } else if (state === 'ANNOUNCE') {
-    startRelaxTimer();
+    const elapsedSec = (Date.now() - announceStartAt) / 1000;
+    let relaxTime = BASE_RELAX_TIME;
+    nextWorkDuration = NORMAL_WORK_TIME;
+
+    if (elapsedSec >= 300) {
+      relaxTime = 5 * 60;
+      nextWorkDuration = PENALTY_WORK_TIME;
+    } else if (elapsedSec >= 180) {
+      relaxTime = 3 * 60;
+      nextWorkDuration = PENALTY_WORK_TIME;
+    } else if (elapsedSec >= 60) {
+      relaxTime = BASE_RELAX_TIME;
+      nextWorkDuration = PENALTY_WORK_TIME;
+    }
+
+    startRelaxTimer(relaxTime);
   } else if (state === 'WORK') {
     pauseWork();
   }
 });
 
-// Safari/iPadで別アプリ・別タブから戻ったときも、Date.now()基準で即座に補正。
-// バックグラウンド中にsetIntervalが停止しても「実時間」で判定する。
+resetBtn.addEventListener('click', () => {
+  initAudio();
+  openPinModal();
+});
+
+modalCancel.addEventListener('click', closePinModal);
+modalConfirm.addEventListener('click', handlePinSubmit);
+
+pinInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') handlePinSubmit();
+});
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    if (state === 'WORK' || state === 'RELAX') tick();
+    if (state === 'WORK' || state === 'RELAX' || state === 'ANNOUNCE') tick();
   }
 });
 window.addEventListener('pageshow', () => {
-  if (state === 'WORK' || state === 'RELAX') tick();
+  if (state === 'WORK' || state === 'RELAX' || state === 'ANNOUNCE') tick();
 });
 
-// 初期表示
 updateDisplay();
-
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
